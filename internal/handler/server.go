@@ -1,0 +1,220 @@
+package handler
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	api "github.com/ogrock3t/go-lw-avito/internal/generated"
+	"github.com/ogrock3t/go-lw-avito/internal/trip"
+)
+
+type Server struct {
+	api.Unimplemented
+
+	service      *trip.Service
+	pool         *pgxpool.Pool
+	queryTimeout time.Duration
+}
+
+func NewServer(service *trip.Service, pool *pgxpool.Pool, queryTimeout time.Duration) *Server {
+	return &Server{
+		service:      service,
+		pool:         pool,
+		queryTimeout: queryTimeout,
+	}
+}
+
+func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.CreateTripParams) {
+	var body api.CreateTripJSONRequestBody
+
+	if err := decodeJSON(r, &body); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Invalid JSON body")
+		return
+	}
+
+	if err := validateCreateTrip(body); err != nil {
+		writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", err.Error())
+		return
+	}
+
+	created, err := s.service.CreateTrip(r.Context(), trip.CreateTripInput{
+		UserID:   body.UserId,
+		DriverID: body.DriverId,
+
+		StartLatitude:  body.StartPoint.Latitude,
+		StartLongitude: body.StartPoint.Longitude,
+		EndLatitude:    body.EndPoint.Latitude,
+		EndLongitude:   body.EndPoint.Longitude,
+
+		Price: body.Price,
+	})
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+
+	w.Header().Set("Location", "/api/v1/trips/"+created.ID.String())
+	writeJSON(w, http.StatusCreated, toAPITrip(created))
+}
+
+func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	t, err := s.service.GetTrip(r.Context(), uuid.UUID(tripId))
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toAPITrip(t))
+}
+
+func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+	t, err := s.service.FinishTrip(r.Context(), uuid.UUID(tripId))
+	if err != nil {
+		s.writeDomainError(w, r, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, toAPITrip(t))
+}
+
+func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, api.HealthResponse{
+		Status: api.Ok,
+	})
+}
+
+func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
+	defer cancel()
+
+	if err := s.pool.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, api.HealthResponse{
+			Status: api.Unavailable,
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, api.HealthResponse{
+		Status: api.Ok,
+	})
+}
+
+func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, trip.ErrTripNotFound):
+		writeProblem(w, r, http.StatusNotFound, "trip_not_found", "Trip not found", "Trip not found")
+	case errors.Is(err, trip.ErrDriverBusy):
+		writeProblem(w, r, http.StatusConflict, "driver_busy", "Driver busy", "Driver already has an active trip")
+	case errors.Is(err, trip.ErrTripCompleted):
+		writeProblem(w, r, http.StatusConflict, "trip_completed", "Trip completed", "Trip already completed")
+	default:
+		slog.Error("handle request", "error", err)
+		writeProblem(w, r, http.StatusInternalServerError, "internal_error", "Internal error", "Internal server error")
+	}
+}
+
+func GeneratedErrorHandler(w http.ResponseWriter, r *http.Request, err error) {
+	writeProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Invalid path or header parameter")
+}
+
+func decodeJSON(r *http.Request, dst any) error {
+	defer r.Body.Close()
+
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(dst); err != nil {
+		return err
+	}
+
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return errors.New("body must contain single JSON object")
+	}
+
+	return nil
+}
+
+func validateCreateTrip(body api.CreateTripJSONRequestBody) error {
+	if body.UserId == uuid.Nil {
+		return errors.New("user_id must be non-empty UUID")
+	}
+
+	if body.DriverId == uuid.Nil {
+		return errors.New("driver_id must be non-empty UUID")
+	}
+
+	if !validLatitude(body.StartPoint.Latitude) || !validLatitude(body.EndPoint.Latitude) {
+		return errors.New("latitude must be between -90 and 90")
+	}
+
+	if !validLongitude(body.StartPoint.Longitude) || !validLongitude(body.EndPoint.Longitude) {
+		return errors.New("longitude must be between -180 and 180")
+	}
+
+	if body.Price < 0 {
+		return errors.New("price must be non-negative")
+	}
+
+	return nil
+}
+
+func validLatitude(value float64) bool {
+	return value >= -90 && value <= 90
+}
+
+func validLongitude(value float64) bool {
+	return value >= -180 && value <= 180
+}
+
+func toAPITrip(t trip.Trip) api.Trip {
+	return api.Trip{
+		Id:         t.ID,
+		UserId:     t.UserID,
+		DriverId:   t.DriverID,
+		StartPoint: api.Coordinates{Latitude: t.StartLatitude, Longitude: t.StartLongitude},
+		EndPoint:   api.Coordinates{Latitude: t.EndLatitude, Longitude: t.EndLongitude},
+		Price:      t.Price,
+		Status:     api.TripStatus(t.Status),
+		StartedAt:  t.StartedAt,
+		FinishedAt: t.FinishedAt,
+	}
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+
+	if err := json.NewEncoder(w).Encode(body); err != nil {
+		slog.Error("write json response", "error", err)
+	}
+}
+
+func writeProblem(w http.ResponseWriter, r *http.Request, statusCode int, code string, title string, detail string) {
+	instance := r.URL.Path
+
+	writeProblemBody(w, statusCode, api.Problem{
+		Type:     "https://tripgo.example/problems/" + code,
+		Title:    title,
+		Status:   int32(statusCode),
+		Detail:   &detail,
+		Instance: &instance,
+		Code:     code,
+	})
+}
+
+func writeProblemBody(w http.ResponseWriter, statusCode int, problem api.Problem) {
+	w.Header().Set("Content-Type", "application/problem+json")
+	w.WriteHeader(statusCode)
+
+	if err := json.NewEncoder(w).Encode(problem); err != nil {
+		slog.Error("write problem response", "error", err)
+	}
+}
