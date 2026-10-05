@@ -45,7 +45,10 @@ func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.Create
 		return
 	}
 
-	created, err := s.service.CreateTrip(r.Context(), trip.CreateTripInput{
+	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
+	defer cancel()
+
+	created, err := s.service.CreateTrip(ctx, trip.CreateTripInput{
 		UserID:   body.UserId,
 		DriverID: body.DriverId,
 
@@ -66,7 +69,10 @@ func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.Create
 }
 
 func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
-	t, err := s.service.GetTrip(r.Context(), uuid.UUID(tripId))
+	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
+	defer cancel()
+
+	t, err := s.service.GetTrip(ctx, uuid.UUID(tripId))
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
@@ -76,7 +82,10 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.Trip
 }
 
 func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
-	t, err := s.service.FinishTrip(r.Context(), uuid.UUID(tripId))
+	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
+	defer cancel()
+
+	t, err := s.service.FinishTrip(ctx, uuid.UUID(tripId))
 	if err != nil {
 		s.writeDomainError(w, r, err)
 		return
