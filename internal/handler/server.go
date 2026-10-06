@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	api "github.com/ogrock3t/go-lw-avito/internal/generated"
 	"github.com/ogrock3t/go-lw-avito/internal/trip"
@@ -19,8 +18,8 @@ import (
 type server struct {
 	api.Unimplemented
 
-	service      *trip.Service
-	pool         *pgxpool.Pool
+	service      tripService
+	pool         databasePool
 	queryTimeout time.Duration
 }
 
@@ -37,7 +36,7 @@ type coordinatesRequest struct {
 	Longitude *float64 `json:"longitude"`
 }
 
-func NewServer(service *trip.Service, pool *pgxpool.Pool, queryTimeout time.Duration) *server {
+func NewServer(service tripService, pool databasePool, queryTimeout time.Duration) *server {
 	return &server{
 		service:      service,
 		pool:         pool,
@@ -62,13 +61,13 @@ func (s *server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.Create
 	defer cancel()
 
 	created, err := s.service.CreateTrip(ctx, trip.CreateTripInput{
-		UserID:   *body.UserID,
-		DriverID: *body.DriverID,
+		UserID:         *body.UserID,
+		DriverID:       *body.DriverID,
 		StartLatitude:  *body.StartPoint.Latitude,
 		StartLongitude: *body.StartPoint.Longitude,
 		EndLatitude:    *body.EndPoint.Latitude,
 		EndLongitude:   *body.EndPoint.Longitude,
-		Price: *body.Price,
+		Price:          *body.Price,
 	})
 	if err != nil {
 		s.writeDomainError(w, r, err)
