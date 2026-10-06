@@ -16,7 +16,7 @@ import (
 	"github.com/ogrock3t/go-lw-avito/internal/trip"
 )
 
-type Server struct {
+type server struct {
 	api.Unimplemented
 
 	service      *trip.Service
@@ -37,15 +37,15 @@ type coordinatesRequest struct {
 	Longitude *float64 `json:"longitude"`
 }
 
-func NewServer(service *trip.Service, pool *pgxpool.Pool, queryTimeout time.Duration) *Server {
-	return &Server{
+func NewServer(service *trip.Service, pool *pgxpool.Pool, queryTimeout time.Duration) *server {
+	return &server{
 		service:      service,
 		pool:         pool,
 		queryTimeout: queryTimeout,
 	}
 }
 
-func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.CreateTripParams) {
+func (s *server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.CreateTripParams) {
 	var body createTripRequest
 
 	if err := decodeJSON(r, &body); err != nil {
@@ -79,7 +79,7 @@ func (s *Server) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.Create
 	writeJSON(w, http.StatusCreated, toAPITrip(created))
 }
 
-func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+func (s *server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
 	defer cancel()
 
@@ -92,7 +92,7 @@ func (s *Server) GetTrip(w http.ResponseWriter, r *http.Request, tripId api.Trip
 	writeJSON(w, http.StatusOK, toAPITrip(t))
 }
 
-func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
+func (s *server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.TripId) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
 	defer cancel()
 
@@ -105,13 +105,13 @@ func (s *Server) FinishTrip(w http.ResponseWriter, r *http.Request, tripId api.T
 	writeJSON(w, http.StatusOK, toAPITrip(t))
 }
 
-func (s *Server) Health(w http.ResponseWriter, r *http.Request) {
+func (s *server) Health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, api.HealthResponse{
 		Status: api.Ok,
 	})
 }
 
-func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
+func (s *server) Ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), s.queryTimeout)
 	defer cancel()
 
@@ -127,7 +127,7 @@ func (s *Server) Ready(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
+func (s *server) writeDomainError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, trip.ErrTripNotFound):
 		writeProblem(w, r, http.StatusNotFound, "trip_not_found", "Trip not found", "Trip not found")
