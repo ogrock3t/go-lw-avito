@@ -9,12 +9,19 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
+type OTLPProtocol string
+
+const (
+	OTLPProtocolHTTPProtobuf OTLPProtocol = "http/protobuf"
+)
+
 type Config struct {
 	LogLevel        string        `env:"LOG_LEVEL" env-required:"true" validate:"oneof=debug info warn error"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-required:"true" validate:"gt=0"`
 
-	HTTP     HTTPConfig
-	Database DatabaseConfig
+	HTTP      HTTPConfig
+	Database  DatabaseConfig
+	Telemetry TelemetryConfig
 }
 
 type HTTPConfig struct {
@@ -32,6 +39,14 @@ type DatabaseConfig struct {
 	MaxConnLifetime time.Duration `env:"DATABASE_MAX_CONN_LIFETIME" env-required:"true" validate:"gt=0"`
 	ConnectTimeout  time.Duration `env:"DATABASE_CONNECT_TIMEOUT" env-required:"true" validate:"gt=0"`
 	QueryTimeout    time.Duration `env:"DATABASE_QUERY_TIMEOUT" env-required:"true" validate:"gt=0"`
+}
+
+type TelemetryConfig struct {
+	ServiceName        string       `env:"OTEL_SERVICE_NAME" env-required:"true" validate:"required"`
+	ExporterEndpoint   string       `env:"OTEL_EXPORTER_OTLP_ENDPOINT" env-required:"true" validate:"required"`
+	ExporterProtocol   OTLPProtocol `env:"OTEL_EXPORTER_OTLP_PROTOCOL" env-required:"true" validate:"eq=http/protobuf"`
+	ResourceAttributes string       `env:"OTEL_RESOURCE_ATTRIBUTES"`
+	TracesSampler      string       `env:"OTEL_TRACES_SAMPLER" env-required:"true" validate:"oneof=always_on always_off parentbased_always_on parentbased_always_off"`
 }
 
 func Load() (Config, error) {
