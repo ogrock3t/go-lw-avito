@@ -28,7 +28,7 @@ func NewUseCase(repo tripRepository, txManager txManager, logger *slog.Logger, m
 }
 
 func (uc *UseCase) CreateTrip(ctx context.Context, input model.CreateTripInput) (trip.Trip, error) {
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	t := trip.Trip{
 		ID: uuid.New(),

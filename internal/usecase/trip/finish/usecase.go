@@ -27,7 +27,7 @@ func NewUseCase(repo tripRepository, txManager txManager, logger *slog.Logger, m
 }
 
 func (uc *UseCase) FinishTrip(ctx context.Context, id uuid.UUID) (trip.Trip, error) {
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	var finished trip.Trip
 
