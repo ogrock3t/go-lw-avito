@@ -2,64 +2,58 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/ogrock3t/go-lw-avito/internal/config"
-	api "github.com/ogrock3t/go-lw-avito/internal/generated"
-	"github.com/ogrock3t/go-lw-avito/internal/handler"
-	"github.com/ogrock3t/go-lw-avito/internal/storage/postgres"
-	"github.com/ogrock3t/go-lw-avito/internal/trip"
+	"github.com/ogrock3t/go-lw-avito/internal/container"
 )
 
 func main() {
+	if err := run(); err != nil {
+		bootstrapLogger := slog.New(slog.NewJSONHandler(os.Stderr, nil))
+
+		bootstrapLogger.Error("service stopped with error", slog.Any("error", err))
+
+		os.Exit(1)
+	}
+}
+
+func run() (runErr error) {
 	ctx := context.Background()
 
 	cfg, err := config.Load()
 	if err != nil {
-		slog.Error("load config", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("load config: %w", err)
 	}
 
-	pool, err := postgres.NewPool(ctx, cfg.Database)
+	app, err := container.New(ctx, cfg)
 	if err != nil {
-		slog.Error("connect database", "error", err)
-		os.Exit(1)
+		return fmt.Errorf("create container: %w", err)
 	}
-	defer pool.Close()
 
-	tripRepo := postgres.NewTripRepository(pool)
-	txManager := postgres.NewTxManager(pool)
-	tripService := trip.NewService(tripRepo, txManager)
+	logger := app.Logger
 
-	apiServer := handler.NewServer(tripService, pool, cfg.Database.QueryTimeout)
+	defer func() {
+		closeCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		defer cancel()
 
-	router := chi.NewRouter()
-	httpHandler := api.HandlerWithOptions(apiServer, api.ChiServerOptions{
-		BaseRouter:       router,
-		ErrorHandlerFunc: handler.GeneratedErrorHandler,
-	})
-
-	server := &http.Server{
-		Addr:              cfg.HTTP.Addr,
-		Handler:           httpHandler,
-		ReadTimeout:       cfg.HTTP.ReadTimeout,
-		ReadHeaderTimeout: cfg.HTTP.ReadHeaderTimeout,
-		WriteTimeout:      cfg.HTTP.WriteTimeout,
-		IdleTimeout:       cfg.HTTP.IdleTimeout,
-	}
+		if err := app.Close(closeCtx); err != nil {
+			logger.Warn("failed to shut down telemetry", slog.Any("error", err))
+		}
+	}()
 
 	serverErrCh := make(chan error, 1)
 
 	go func() {
-		slog.Info("server started", "http_addr", cfg.HTTP.Addr)
+		logger.Info("server started", slog.String("http_addr", cfg.HTTP.Addr))
 
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := app.HTTPServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			serverErrCh <- err
 		}
 	}()
@@ -70,20 +64,20 @@ func main() {
 
 	select {
 	case err := <-serverErrCh:
-		slog.Error("server failed", "error", err)
-		os.Exit(1)
+		return err
 
 	case sig := <-shutdownCh:
-		slog.Info("shutdown signal received", "signal", sig.String())
+		logger.Info("shutdown signal received", slog.String("signal", sig.String()))
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("shutdown server", "error", err)
-		os.Exit(1)
+	if err := app.HTTPServer.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown server: %w", err)
 	}
 
-	slog.Info("server stopped")
+	logger.Info("server stopped")
+
+	return nil
 }
