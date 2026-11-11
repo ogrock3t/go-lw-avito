@@ -24,6 +24,7 @@ func NewHTTPMetrics(meterProvider metric.MeterProvider) (*HTTPMetrics, error) {
 		"http.server.request.duration",
 		metric.WithUnit("s"),
 		metric.WithDescription("Duration of HTTP requests"),
+		metric.WithExplicitBucketBoundaries(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("create request duration histogram: %w", err)
