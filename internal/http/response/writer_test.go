@@ -1,3 +1,4 @@
+//go:generate go tool mockgen -destination=mocks_test.go -package=response_test net/http ResponseWriter
 package response_test
 
 import (
@@ -9,18 +10,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"go.uber.org/mock/gomock"
+
 	api "github.com/ogrock3t/go-lw-avito/internal/generated"
 	"github.com/ogrock3t/go-lw-avito/internal/http/response"
 )
-
-type failedWriter struct {
-	*httptest.ResponseRecorder
-	err error
-}
-
-func (w *failedWriter) Write([]byte) (int, error) {
-	return 0, w.err
-}
 
 func TestWriter_LogsWriteFailure(t *testing.T) {
 	for _, problem := range []bool{false, true} {
@@ -32,12 +26,21 @@ func TestWriter_LogsWriteFailure(t *testing.T) {
 			var logs bytes.Buffer
 			writer := response.NewWriter(slog.New(slog.NewJSONHandler(&logs, nil)))
 			writeErr := errors.New("client disconnected")
-			w := &failedWriter{ResponseRecorder: httptest.NewRecorder(), err: writeErr}
+			w := NewMockResponseWriter(gomock.NewController(t))
+			status := http.StatusOK
+			if problem {
+				status = http.StatusInternalServerError
+			}
+			gomock.InOrder(
+				w.EXPECT().Header().Return(make(http.Header)),
+				w.EXPECT().WriteHeader(status),
+				w.EXPECT().Write(gomock.Any()).Return(0, writeErr),
+			)
 			r := httptest.NewRequest(http.MethodGet, "/", nil)
 			if problem {
-				writer.WriteProblemBody(w, r, http.StatusInternalServerError, api.Problem{Code: "internal_error"})
+				writer.WriteProblemBody(w, r, status, api.Problem{Code: "internal_error"})
 			} else {
-				writer.WriteJSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
+				writer.WriteJSON(w, r, status, map[string]string{"status": "ok"})
 			}
 			var record map[string]any
 			if err := json.Unmarshal(logs.Bytes(), &record); err != nil {
