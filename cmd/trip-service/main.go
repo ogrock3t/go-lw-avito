@@ -44,7 +44,7 @@ func run() (runErr error) {
 		defer cancel()
 
 		if err := app.Close(closeCtx); err != nil {
-			runErr = errors.Join(runErr, fmt.Errorf("close container: %w", err))
+			logger.Warn("failed to shut down telemetry", slog.Any("error", err))
 		}
 	}()
 
