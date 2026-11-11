@@ -162,8 +162,8 @@ func TestHandler_CreateTrip_InvalidBody(t *testing.T) {
 	if problem.Code != "invalid_request" {
 		t.Errorf("CreateTrip() problem code = %q, want %q", problem.Code, "invalid_request")
 	}
-	if problem.Detail == nil || *problem.Detail != "Invalid JSON body" {
-		t.Errorf("CreateTrip() problem detail = %v, want %q", problem.Detail, "Invalid JSON body")
+	if problem.Detail == nil || *problem.Detail != "Invalid JSON body: unexpected EOF" {
+		t.Errorf("CreateTrip() problem detail = %v, want %q", problem.Detail, "Invalid JSON body: unexpected EOF")
 	}
 	if problem.Instance == nil || *problem.Instance != "/api/v1/trips" {
 		t.Errorf("CreateTrip() problem instance = %v, want %q", problem.Instance, "/api/v1/trips")

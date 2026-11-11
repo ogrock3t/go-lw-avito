@@ -35,7 +35,19 @@ func newProblem(status int32, code, title, detail string) (int, api.Problem) {
 
 func NewGeneratedErrorHandler(logger *slog.Logger) func(http.ResponseWriter, *http.Request, error) {
 	writer := response.NewWriter(logger)
-	return func(w http.ResponseWriter, r *http.Request, _ error) {
-		writer.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Invalid path or header parameter")
+	return func(w http.ResponseWriter, r *http.Request, err error) {
+		detail := "Invalid path or header parameter"
+
+		var invalid *api.InvalidParamFormatError
+		var multiple *api.TooManyValuesForParamError
+
+		switch {
+		case errors.As(err, &invalid):
+			detail = invalid.ParamName + " must be a valid UUID"
+		case errors.As(err, &multiple):
+			detail = multiple.ParamName + " must have exactly one value"
+		}
+
+		writer.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", detail)
 	}
 }

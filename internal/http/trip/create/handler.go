@@ -34,7 +34,8 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, _ api.Creat
 	var body createTripRequest
 
 	if err := request.DecodeJSON(r, &body); err != nil {
-		h.response.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", "Invalid JSON body")
+		detail := "Invalid JSON body: " + err.Error()
+		h.response.WriteProblem(w, r, http.StatusBadRequest, "invalid_request", "Invalid request", detail)
 		return
 	}
 
