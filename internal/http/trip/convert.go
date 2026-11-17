@@ -18,3 +18,15 @@ func ToAPITrip(t trip.Trip) api.Trip {
 		FinishedAt: t.FinishedAt,
 	}
 }
+
+func ToAPIPosition(position trip.Position) api.TripPosition {
+	return api.TripPosition{
+		Id:     position.ID,
+		TripId: position.TripId,
+		Coordinates: api.Coordinates{
+			Latitude:  position.Latitude,
+			Longitude: position.Longitude,
+		},
+		RecordedAt: position.RecordedAt.UTC(),
+	}
+}

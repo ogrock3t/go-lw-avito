@@ -19,6 +19,8 @@ import (
 	createhttp "github.com/ogrock3t/go-lw-avito/internal/http/trip/create"
 	finishhttp "github.com/ogrock3t/go-lw-avito/internal/http/trip/finish"
 	gethttp "github.com/ogrock3t/go-lw-avito/internal/http/trip/get"
+	getpositionshttp "github.com/ogrock3t/go-lw-avito/internal/http/trip/getpositions"
+	savepositionshttp "github.com/ogrock3t/go-lw-avito/internal/http/trip/saveposititons"
 	"github.com/ogrock3t/go-lw-avito/internal/infra/postgres"
 	"github.com/ogrock3t/go-lw-avito/internal/infra/postgres/transaction"
 	telemetryinfra "github.com/ogrock3t/go-lw-avito/internal/infra/telemetry"
@@ -26,6 +28,8 @@ import (
 	createuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/create"
 	finishuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/finish"
 	getuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/get"
+	getpositionsuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/getpositions"
+	savepositionsuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/savepositions"
 )
 
 type Container struct {
@@ -63,17 +67,23 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	createUseCase := createuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
 	getUseCase := getuc.NewUseCase(tripRepository)
 	finishUseCase := finishuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
+	savePositionUseCase := savepositionsuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
+	getPositionsUseCase := getpositionsuc.NewUseCase(tripRepository)
 
 	createHandler := createhttp.NewHandler(createUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)
 	getHandler := gethttp.NewHandler(getUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)
 	finishHandler := finishhttp.NewHandler(finishUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)
 	healthHandler := health.NewHandler(pool, cfg.Database.QueryTimeout, telemetryService.Logger)
+	savePositionHandler := savepositionshttp.NewHandler(savePositionUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)
+	getPositionsHandler := getpositionshttp.NewHandler(getPositionsUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)
 
 	apiServer := transporthttp.NewServer(
 		createHandler,
 		getHandler,
 		finishHandler,
 		healthHandler,
+		savePositionHandler,
+		getPositionsHandler,
 	)
 
 	httpMetrics, err := httpmiddleware.NewHTTPMetrics(telemetryService.MeterProvider)

@@ -8,8 +8,9 @@ import (
 )
 
 type TripMetrics struct {
-	created   metric.Int64Counter
-	completed metric.Int64Counter
+	created        metric.Int64Counter
+	completed      metric.Int64Counter
+	positionsSaved metric.Int64Counter
 }
 
 func NewTripMetrics(provider metric.MeterProvider) (*TripMetrics, error) {
@@ -30,7 +31,17 @@ func NewTripMetrics(provider metric.MeterProvider) (*TripMetrics, error) {
 	if err != nil {
 		return nil, fmt.Errorf("create trips completed counter: %w", err)
 	}
-	return &TripMetrics{created: created, completed: completed}, nil
+
+	positionsSaved, err := meter.Int64Counter("tripgo.positions.saved")
+	if err != nil {
+		return nil, fmt.Errorf("create positions saved counter: %w", err)
+	}
+
+	return &TripMetrics{
+		created:        created,
+		completed:      completed,
+		positionsSaved: positionsSaved,
+	}, nil
 }
 
 func (m *TripMetrics) TripCreated(ctx context.Context) {
@@ -39,4 +50,8 @@ func (m *TripMetrics) TripCreated(ctx context.Context) {
 
 func (m *TripMetrics) TripCompleted(ctx context.Context) {
 	m.completed.Add(ctx, 1)
+}
+
+func (m *TripMetrics) PositionSaved(ctx context.Context) {
+	m.positionsSaved.Add(ctx, 1)
 }

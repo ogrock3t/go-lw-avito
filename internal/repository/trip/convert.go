@@ -47,3 +47,21 @@ func statusToNullableString(status *trip.Status) any {
 
 	return string(*status)
 }
+
+func scanPosition(row pgx.Row) (trip.Position, error) {
+	var position trip.Position
+
+	err := row.Scan(
+		&position.ID,
+		&position.TripId,
+		&position.Latitude,
+		&position.Longitude,
+		&position.RecordedAt,
+		&position.CreatedAt,
+	)
+	if err != nil {
+		return trip.Position{}, err
+	}
+
+	return position, nil
+}

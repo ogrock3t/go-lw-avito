@@ -1,0 +1,12 @@
+package getpositions
+
+import (
+	"context"
+	"github.com/google/uuid"
+	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
+)
+
+type tripRepository interface {
+	GetByID(ctx context.Context, id uuid.UUID) (trip.Trip, error)
+	ListPositions(ctx context.Context, tripID uuid.UUID) ([]trip.Position, error)
+}

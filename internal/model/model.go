@@ -2,6 +2,7 @@ package model
 
 import (
 	"github.com/google/uuid"
+	"time"
 )
 
 type CreateTripInput struct {
@@ -14,4 +15,11 @@ type CreateTripInput struct {
 	EndLongitude   float64
 
 	Price int64
+}
+
+type SavePositionsInput struct {
+	Latitude  float64
+	Longitude float64
+
+	RecordedAt time.Time
 }
