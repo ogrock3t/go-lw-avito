@@ -22,6 +22,7 @@ type Config struct {
 	HTTP      HTTPConfig
 	Database  DatabaseConfig
 	Telemetry TelemetryConfig
+	Positions PositionsConfig
 }
 
 type HTTPConfig struct {
@@ -47,6 +48,10 @@ type TelemetryConfig struct {
 	ExporterProtocol   OTLPProtocol `env:"OTEL_EXPORTER_OTLP_PROTOCOL" env-required:"true" validate:"eq=http/protobuf"`
 	ResourceAttributes string       `env:"OTEL_RESOURCE_ATTRIBUTES"`
 	TracesSampler      string       `env:"OTEL_TRACES_SAMPLER" env-required:"true" validate:"oneof=always_on always_off parentbased_always_on parentbased_always_off"`
+}
+
+type PositionsConfig struct {
+	QueueSize int `env:"POSITION_QUEUE_SIZE" env-default:"100" validate:"gt=0"`
 }
 
 func Load() (Config, error) {

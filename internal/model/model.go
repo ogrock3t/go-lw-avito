@@ -23,3 +23,9 @@ type SavePositionsInput struct {
 
 	RecordedAt time.Time
 }
+
+type StaleTrip struct {
+	TripID         uuid.UUID
+	DriverID       uuid.UUID
+	LastActivityAt time.Time
+}

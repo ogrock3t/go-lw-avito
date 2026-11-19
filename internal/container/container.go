@@ -30,6 +30,7 @@ import (
 	getuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/get"
 	getpositionsuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/getpositions"
 	savepositionsuc "github.com/ogrock3t/go-lw-avito/internal/usecase/trip/savepositions"
+	"github.com/ogrock3t/go-lw-avito/internal/worker/positions"
 )
 
 type Container struct {
@@ -64,10 +65,20 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 	tripRepository := trip.NewRepository(pool)
 	txManager := transaction.NewTxManager(pool)
 
+	positionQueue, err := positions.NewQueue(cfg.Positions.QueueSize)
+	if err != nil {
+		pool.Close()
+		shutdownErr := telemetryService.Shutdown(ctx)
+
+		return nil, errors.Join(fmt.Errorf("create position queue: %w", err), shutdownErr)
+	}
+
 	createUseCase := createuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
 	getUseCase := getuc.NewUseCase(tripRepository)
 	finishUseCase := finishuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
-	savePositionUseCase := savepositionsuc.NewUseCase(tripRepository, txManager, telemetryService.Logger, tripMetrics)
+	savePositionUseCase := savepositionsuc.NewUseCase(
+		tripRepository, txManager, telemetryService.Logger, tripMetrics, positionQueue,
+	)
 	getPositionsUseCase := getpositionsuc.NewUseCase(tripRepository)
 
 	createHandler := createhttp.NewHandler(createUseCase, cfg.Database.QueryTimeout, telemetryService.Logger)

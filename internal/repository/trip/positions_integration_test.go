@@ -21,6 +21,7 @@ import (
 	"github.com/ogrock3t/go-lw-avito/internal/infra/telemetry"
 	"github.com/ogrock3t/go-lw-avito/internal/model"
 	"github.com/ogrock3t/go-lw-avito/internal/usecase/trip/savepositions"
+	"github.com/ogrock3t/go-lw-avito/internal/worker/positions"
 )
 
 func TestSavePosition_PersistsLatePositionWithoutRewindingLastPositionAt(t *testing.T) {
@@ -30,7 +31,13 @@ func TestSavePosition_PersistsLatePositionWithoutRewindingLastPositionAt(t *test
 	cleanupTrips(t, pool, activeTrip.ID)
 	insertTrip(t, ctx, pool, activeTrip)
 
-	useCase := savepositions.NewUseCase(repository, transaction.NewTxManager(pool), slog.Default(), newPositionTestMetrics(t))
+	positionQueue, err := positions.NewQueue(1)
+	if err != nil {
+		t.Fatalf("create position queue: %v", err)
+	}
+	useCase := savepositions.NewUseCase(
+		repository, transaction.NewTxManager(pool), slog.Default(), newPositionTestMetrics(t), positionQueue,
+	)
 	input := model.SavePositionsInput{
 		Latitude:   55.75,
 		Longitude:  37.61,
@@ -93,11 +100,15 @@ func TestSavePosition_RollsBackWhenUpdateLastPositionFails(t *testing.T) {
 
 			return updateErr
 		})
+	positionQueue, err := positions.NewQueue(1)
+	if err != nil {
+		t.Fatalf("create position queue: %v", err)
+	}
 	useCase := savepositions.NewUseCase(
-		failingRepository, transaction.NewTxManager(pool), slog.Default(), newPositionTestMetrics(t),
+		failingRepository, transaction.NewTxManager(pool), slog.Default(), newPositionTestMetrics(t), positionQueue,
 	)
 
-	_, err := useCase.SavePosition(ctx, activeTrip.ID, model.SavePositionsInput{
+	_, err = useCase.SavePosition(ctx, activeTrip.ID, model.SavePositionsInput{
 		Latitude:   55.75,
 		Longitude:  37.61,
 		RecordedAt: activeTrip.StartedAt,

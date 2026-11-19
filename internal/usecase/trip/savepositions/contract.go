@@ -20,3 +20,7 @@ type txManager interface {
 type tripMetrics interface {
 	PositionSaved(ctx context.Context)
 }
+
+type positionCanceler interface {
+	CancelTrip(tripID uuid.UUID)
+}

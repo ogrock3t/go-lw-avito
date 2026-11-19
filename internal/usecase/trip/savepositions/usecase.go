@@ -9,18 +9,20 @@ import (
 )
 
 type UseCase struct {
-	repo      tripRepository
-	txManager txManager
-	logger    *slog.Logger
-	metrics   tripMetrics
+	repo             tripRepository
+	txManager        txManager
+	logger           *slog.Logger
+	metrics          tripMetrics
+	positionCanceler positionCanceler
 }
 
-func NewUseCase(repo tripRepository, txManager txManager, logger *slog.Logger, metrics tripMetrics) *UseCase {
+func NewUseCase(repo tripRepository, txManager txManager, logger *slog.Logger, metrics tripMetrics, positionCanceler positionCanceler) *UseCase {
 	return &UseCase{
-		repo:      repo,
-		txManager: txManager,
-		logger:    logger,
-		metrics:   metrics,
+		repo:             repo,
+		txManager:        txManager,
+		logger:           logger,
+		metrics:          metrics,
+		positionCanceler: positionCanceler,
 	}
 }
 
@@ -58,6 +60,8 @@ func (uc *UseCase) SavePosition(ctx context.Context, tripID uuid.UUID, input mod
 	if err != nil {
 		return trip.Position{}, err
 	}
+
+	uc.positionCanceler.CancelTrip(tripID)
 
 	uc.metrics.PositionSaved(ctx)
 	uc.logger.InfoContext(ctx, "trip position saved",
