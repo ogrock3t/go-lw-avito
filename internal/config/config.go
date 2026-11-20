@@ -9,12 +9,21 @@ import (
 	"github.com/ilyakaznacheev/cleanenv"
 )
 
+type OTLPProtocol string
+
+const (
+	OTLPProtocolHTTPProtobuf OTLPProtocol = "http/protobuf"
+)
+
 type Config struct {
 	LogLevel        string        `env:"LOG_LEVEL" env-required:"true" validate:"oneof=debug info warn error"`
 	ShutdownTimeout time.Duration `env:"SHUTDOWN_TIMEOUT" env-required:"true" validate:"gt=0"`
 
-	HTTP     HTTPConfig
-	Database DatabaseConfig
+	HTTP      HTTPConfig
+	Database  DatabaseConfig
+	Telemetry TelemetryConfig
+	Positions PositionsConfig
+	Push      PushConfig
 }
 
 type HTTPConfig struct {
@@ -32,6 +41,26 @@ type DatabaseConfig struct {
 	MaxConnLifetime time.Duration `env:"DATABASE_MAX_CONN_LIFETIME" env-required:"true" validate:"gt=0"`
 	ConnectTimeout  time.Duration `env:"DATABASE_CONNECT_TIMEOUT" env-required:"true" validate:"gt=0"`
 	QueryTimeout    time.Duration `env:"DATABASE_QUERY_TIMEOUT" env-required:"true" validate:"gt=0"`
+}
+
+type TelemetryConfig struct {
+	ServiceName        string       `env:"OTEL_SERVICE_NAME" env-required:"true" validate:"required"`
+	ExporterEndpoint   string       `env:"OTEL_EXPORTER_OTLP_ENDPOINT" env-required:"true" validate:"required"`
+	ExporterProtocol   OTLPProtocol `env:"OTEL_EXPORTER_OTLP_PROTOCOL" env-required:"true" validate:"eq=http/protobuf"`
+	ResourceAttributes string       `env:"OTEL_RESOURCE_ATTRIBUTES"`
+	TracesSampler      string       `env:"OTEL_TRACES_SAMPLER" env-required:"true" validate:"oneof=always_on always_off parentbased_always_on parentbased_always_off"`
+}
+
+type PositionsConfig struct {
+	CheckInterval time.Duration `env:"POSITION_CHECK_INTERVAL" env-default:"30s" validate:"gt=0"`
+	StaleAfter    time.Duration `env:"POSITION_STALE_AFTER" env-default:"60s" validate:"gt=0"`
+	Workers       int           `env:"POSITION_WORKERS" env-default:"4" validate:"gt=0"`
+	QueueSize     int           `env:"POSITION_QUEUE_SIZE" env-default:"100" validate:"gt=0"`
+}
+
+type PushConfig struct {
+	HTTPURL        string        `env:"PUSH_HTTP_URL" env-required:"true" validate:"required,http_url"`
+	RequestTimeout time.Duration `env:"PUSH_REQUEST_TIMEOUT" env-default:"1s" validate:"gt=0"`
 }
 
 func Load() (Config, error) {

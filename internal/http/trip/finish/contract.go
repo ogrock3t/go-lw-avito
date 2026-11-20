@@ -1,0 +1,15 @@
+//go:generate go tool mockgen -source=$GOFILE -destination=mocks_test.go -package=${GOPACKAGE}_test
+
+package finish
+
+import (
+	"context"
+
+	"github.com/google/uuid"
+
+	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
+)
+
+type useCase interface {
+	FinishTrip(ctx context.Context, id uuid.UUID) (trip.Trip, error)
+}
