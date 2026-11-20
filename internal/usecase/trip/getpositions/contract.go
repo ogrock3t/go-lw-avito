@@ -1,8 +1,12 @@
+//go:generate go tool mockgen -source=$GOFILE -destination=mocks_test.go -package=${GOPACKAGE}_test
+
 package getpositions
 
 import (
 	"context"
+
 	"github.com/google/uuid"
+
 	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
 )
 

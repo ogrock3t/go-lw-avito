@@ -25,7 +25,6 @@ func TestTripMetrics(t *testing.T) {
 	metrics.TripCreated(ctx)
 	metrics.TripCompleted(ctx)
 	assertTripCounters(t, reader, 2, 1)
-	// Repeated collection must retain cumulative counts.
 	assertTripCounters(t, reader, 2, 1)
 	metrics.TripCompleted(ctx)
 	assertTripCounters(t, reader, 2, 2)

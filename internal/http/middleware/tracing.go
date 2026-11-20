@@ -58,7 +58,6 @@ func Tracing(tracerProvider trace.TracerProvider) func(http.Handler) http.Handle
 						attribute.String("error.type", "panic"),
 						attribute.Int("http.response.status_code", statusCode),
 					)
-					// Keep the outer Recover responsible for the HTTP response.
 					panic(recovered)
 				}
 			}()

@@ -39,45 +39,65 @@ func run() (runErr error) {
 
 	logger := app.Logger
 
+	var serverDone chan struct{}
+
 	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(
+			context.Background(),
+			cfg.ShutdownTimeout,
+		)
 		defer cancel()
 
-		if err := app.Close(closeCtx); err != nil {
-			logger.Warn("failed to shut down telemetry", slog.Any("error", err))
+		if err := app.Close(shutdownCtx); err != nil {
+			runErr = errors.Join(
+				runErr,
+				fmt.Errorf("shutdown application: %w", err),
+			)
 		}
-	}()
 
-	serverErrCh := make(chan error, 1)
-
-	go func() {
-		logger.Info("server started", slog.String("http_addr", cfg.HTTP.Addr))
-
-		if err := app.HTTPServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErrCh <- err
+		if serverDone != nil {
+			<-serverDone
 		}
+
+		logger.Info("service stopped")
 	}()
 
 	shutdownCh := make(chan os.Signal, 1)
 	signal.Notify(shutdownCh, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(shutdownCh)
 
+	if err := app.Start(ctx); err != nil {
+		return err
+	}
+
+	serverErrCh := make(chan error, 1)
+	serverDone = make(chan struct{})
+
+	go func() {
+		defer close(serverDone)
+
+		logger.Info(
+			"starting HTTP server",
+			slog.String("http_addr", cfg.HTTP.Addr),
+		)
+
+		serverErrCh <- app.HTTPServer.ListenAndServe()
+	}()
+
 	select {
 	case err := <-serverErrCh:
-		return err
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("serve HTTP: %w", err)
+		}
+
+		return nil
 
 	case sig := <-shutdownCh:
-		logger.Info("shutdown signal received", slog.String("signal", sig.String()))
+		logger.Info(
+			"shutdown signal received",
+			slog.String("signal", sig.String()),
+		)
+
+		return nil
 	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-	defer cancel()
-
-	if err := app.HTTPServer.Shutdown(shutdownCtx); err != nil {
-		return fmt.Errorf("shutdown server: %w", err)
-	}
-
-	logger.Info("server stopped")
-
-	return nil
 }

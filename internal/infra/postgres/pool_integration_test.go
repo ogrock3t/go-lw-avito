@@ -51,7 +51,6 @@ func TestPool_QueryAndTransactionTelemetry(t *testing.T) {
 		t.Fatalf("acquire connection: %v", err)
 	}
 	defer conn.Release()
-	// A session-local table shadows any real trips table and disappears on close.
 	if _, err := conn.Exec(ctx, "CREATE TEMP TABLE trips (id integer PRIMARY KEY)"); err != nil {
 		t.Fatalf("create temporary table: %v", err)
 	}

@@ -61,6 +61,13 @@ func (q *Queue) Close() {
 	}
 }
 
+func (q *Queue) Len() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	return len(q.tasks)
+}
+
 func (q *Queue) beginScan() {
 	q.mu.Lock()
 	defer q.mu.Unlock()

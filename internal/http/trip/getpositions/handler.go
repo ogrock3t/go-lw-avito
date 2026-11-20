@@ -2,14 +2,14 @@ package getpositions
 
 import (
 	"context"
+	"log/slog"
+	"net/http"
+	"time"
 
 	api "github.com/ogrock3t/go-lw-avito/internal/generated"
 	"github.com/ogrock3t/go-lw-avito/internal/http/domainerror"
 	"github.com/ogrock3t/go-lw-avito/internal/http/response"
 	"github.com/ogrock3t/go-lw-avito/internal/http/trip"
-	"log/slog"
-	"net/http"
-	"time"
 )
 
 type Handler struct {

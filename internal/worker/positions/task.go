@@ -1,8 +1,10 @@
 package positions
 
 import (
-	"github.com/google/uuid"
 	"time"
+
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type task struct {
@@ -10,4 +12,5 @@ type task struct {
 	tripID         uuid.UUID
 	driverID       uuid.UUID
 	lastActivityAt time.Time
+	scanContext    trace.SpanContext
 }

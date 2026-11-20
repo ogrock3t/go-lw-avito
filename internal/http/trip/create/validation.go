@@ -2,7 +2,6 @@ package create
 
 import "github.com/google/uuid"
 
-// ValidationError describes an invalid field in a create trip request.
 type ValidationError struct {
 	Field  string
 	Reason string

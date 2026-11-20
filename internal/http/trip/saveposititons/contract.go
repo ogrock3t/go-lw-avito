@@ -2,10 +2,12 @@ package saveposititons
 
 import (
 	"context"
+	"time"
+
 	"github.com/google/uuid"
+
 	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
 	"github.com/ogrock3t/go-lw-avito/internal/model"
-	"time"
 )
 
 type savePositionRequest struct {

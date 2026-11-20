@@ -13,7 +13,6 @@ import (
 
 type recoveryStateKey struct{}
 
-// Recover is outside Tracing, so share the inner span identity per request.
 type recoveryState struct {
 	spanContext trace.SpanContext
 }
@@ -46,7 +45,6 @@ func Recover(logger *slog.Logger) func(http.Handler) http.Handler {
 				}
 				logger.LogAttrs(r.Context(), slog.LevelError, "panic recovered", attributes...)
 
-				// Once headers are sent, a new Problem response would corrupt the body.
 				if responseWriter.statusCode != 0 {
 					return
 				}

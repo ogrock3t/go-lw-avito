@@ -103,12 +103,14 @@ func TestRepository_ListStaleTrip(t *testing.T) {
 
 	want := []model.StaleTrip{
 		{
-			TripID:   fixtures[1].tripID,
-			DriverID: fixtures[1].driverID,
+			TripID:         fixtures[1].tripID,
+			DriverID:       fixtures[1].driverID,
+			LastActivityAt: now.Add(-fixtures[1].startedAgo),
 		},
 		{
-			TripID:   fixtures[0].tripID,
-			DriverID: fixtures[0].driverID,
+			TripID:         fixtures[0].tripID,
+			DriverID:       fixtures[0].driverID,
+			LastActivityAt: *fixtures[0].lastPositionAt,
 		},
 	}
 

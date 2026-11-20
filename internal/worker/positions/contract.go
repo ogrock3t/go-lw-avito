@@ -4,9 +4,11 @@ package positions
 
 import (
 	"context"
-	"github.com/google/uuid"
-	"github.com/ogrock3t/go-lw-avito/internal/model"
 	"time"
+
+	"github.com/google/uuid"
+
+	"github.com/ogrock3t/go-lw-avito/internal/model"
 )
 
 type tripRepository interface {
@@ -14,7 +16,7 @@ type tripRepository interface {
 }
 
 type pushGateway interface {
-	RequestPosition(ctx context.Context, driverID uuid.UUID, tripID uuid.UUID) error
+	RequestPosition(ctx context.Context, driverID, tripID uuid.UUID) error
 }
 
 type Ticker interface {

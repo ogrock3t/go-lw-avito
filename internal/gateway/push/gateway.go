@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	metricnoop "go.opentelemetry.io/otel/metric/noop"
 )
 
 type Gateway struct {
-	endpoint string
-	client   *http.Client
+	endpoint  string
+	client    *http.Client
+	transport *http.Transport
 }
 
 type positionRequest struct {
@@ -63,20 +66,24 @@ func NewGateway(baseURL string, timeout time.Duration) (*Gateway, error) {
 	}
 
 	client := &http.Client{
-		Transport: transport,
-		Timeout:   timeout,
+		Transport: otelhttp.NewTransport(
+			transport,
+			otelhttp.WithMeterProvider(metricnoop.NewMeterProvider()),
+		),
+		Timeout: timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
 
 	return &Gateway{
-		endpoint: serviceURL.JoinPath("api", "v1", "push").String(),
-		client:   client,
+		endpoint:  serviceURL.JoinPath("api", "v1", "push").String(),
+		client:    client,
+		transport: transport,
 	}, nil
 }
 
-func (g *Gateway) RequestPosition(ctx context.Context, driverID uuid.UUID, tripID uuid.UUID) error {
+func (g *Gateway) RequestPosition(ctx context.Context, driverID, tripID uuid.UUID) error {
 	payload := positionRequest{
 		RequestID:   uuid.NewString(),
 		RecipientID: driverID,
@@ -123,5 +130,5 @@ func (g *Gateway) RequestPosition(ctx context.Context, driverID uuid.UUID, tripI
 }
 
 func (g *Gateway) CloseIdleConnections() {
-	g.client.CloseIdleConnections()
+	g.transport.CloseIdleConnections()
 }

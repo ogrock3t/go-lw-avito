@@ -2,11 +2,17 @@ package positions
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Worker struct {
@@ -26,6 +32,9 @@ type Worker struct {
 	cancelScanner context.CancelFunc
 	cancelWorkers context.CancelFunc
 	done          chan struct{}
+
+	metrics *Metrics
+	tracer  trace.Tracer
 }
 
 func NewWorker(
@@ -37,6 +46,8 @@ func NewWorker(
 	repo tripRepository,
 	ticker Ticker,
 	staleAfter time.Duration,
+	metrics *Metrics,
+	tracer trace.Tracer,
 ) (*Worker, error) {
 	if workers <= 0 {
 		return nil, fmt.Errorf("worker count must be positive, got %d", workers)
@@ -54,6 +65,14 @@ func NewWorker(
 		return nil, fmt.Errorf("position queue is required")
 	}
 
+	if metrics == nil {
+		return nil, fmt.Errorf("position metrics are required")
+	}
+
+	if tracer == nil {
+		return nil, fmt.Errorf("position tracer is required")
+	}
+
 	return &Worker{
 		queue:          queue,
 		push:           push,
@@ -63,6 +82,8 @@ func NewWorker(
 		repo:           repo,
 		ticker:         ticker,
 		staleAfter:     staleAfter,
+		metrics:        metrics,
+		tracer:         tracer,
 	}, nil
 }
 
@@ -174,23 +195,100 @@ func (w *Worker) runWorker(ctx context.Context) {
 func (w *Worker) process(ctx context.Context, job task) {
 	defer w.queue.complete(job)
 
+	options := []trace.SpanStartOption{
+		trace.WithNewRoot(),
+		trace.WithAttributes(
+			attribute.String("trip_id", job.tripID.String()),
+			attribute.String("task_id", job.id.String()),
+		),
+	}
+
+	if job.scanContext.IsValid() {
+		options = append(
+			options,
+			trace.WithLinks(trace.Link{
+				SpanContext: job.scanContext,
+			}),
+		)
+	}
+
+	ctx, span := w.tracer.Start(ctx, "positions.process", options...)
+
+	var requestErr error
+
+	defer func() {
+		result := requestResult(requestErr)
+
+		w.metrics.requests.Add(
+			ctx,
+			1,
+			metric.WithAttributes(
+				attribute.String("result", result),
+			),
+		)
+
+		span.SetAttributes(attribute.String("result", result))
+
+		if requestErr != nil {
+			span.RecordError(requestErr)
+			span.SetStatus(codes.Error, "position request failed")
+		}
+
+		span.End()
+	}()
+
 	requestCtx, cancel := context.WithTimeout(ctx, w.requestTimeout)
 	defer cancel()
 
 	if !w.queue.start(job, cancel) {
+		requestErr = context.Canceled
 		return
 	}
 
-	if requestCtx.Err() != nil {
+	requestErr = requestCtx.Err()
+	if requestErr != nil {
 		return
 	}
 
-	err := w.push.RequestPosition(requestCtx, job.driverID, job.tripID)
-	if err != nil {
-		w.logger.ErrorContext(ctx, "request trip position",
+	w.metrics.workersActive.Add(ctx, 1)
+	defer w.metrics.workersActive.Add(ctx, -1)
+
+	started := time.Now()
+
+	requestErr = w.push.RequestPosition(
+		requestCtx,
+		job.driverID,
+		job.tripID,
+	)
+
+	w.metrics.duration.Record(
+		ctx,
+		time.Since(started).Seconds(),
+		metric.WithAttributes(
+			attribute.String("result", requestResult(requestErr)),
+		),
+	)
+
+	if requestErr != nil {
+		w.logger.ErrorContext(
+			ctx,
+			"request trip position",
 			slog.String("trip_id", job.tripID.String()),
 			slog.String("task_id", job.id.String()),
-			slog.Any("error", err),
+			slog.Any("error", requestErr),
 		)
+	}
+}
+
+func requestResult(err error) string {
+	switch {
+	case err == nil:
+		return "success"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "timeout"
+	case errors.Is(err, context.Canceled):
+		return "canceled"
+	default:
+		return "error"
 	}
 }

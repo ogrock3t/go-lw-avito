@@ -3,10 +3,12 @@ package trip
 import (
 	"context"
 	"fmt"
+	"time"
+
 	sq "github.com/Masterminds/squirrel"
 	"github.com/google/uuid"
+
 	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
-	"time"
 )
 
 func (r *Repository) InsertPositions(ctx context.Context, position trip.Position) (trip.Position, error) {

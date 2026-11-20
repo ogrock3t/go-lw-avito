@@ -99,8 +99,6 @@ func queryCollection(statement string) string {
 	return ""
 }
 
-// Keep otelpgx's histogram and timing, enriching its measurements from the
-// per-query context even when tracing is disabled by sampling.
 type queryMeterProvider struct {
 	metric.MeterProvider
 }

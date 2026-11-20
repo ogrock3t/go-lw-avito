@@ -3,8 +3,9 @@ package trip
 import (
 	"context"
 	"fmt"
-	"github.com/ogrock3t/go-lw-avito/internal/model"
 	"time"
+
+	"github.com/ogrock3t/go-lw-avito/internal/model"
 )
 
 func (r *Repository) ListStaleTrip(ctx context.Context, staleAfter time.Duration) ([]model.StaleTrip, error) {

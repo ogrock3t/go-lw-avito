@@ -11,6 +11,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	tracenoop "go.opentelemetry.io/otel/trace/noop"
 	"go.uber.org/mock/gomock"
 
 	"github.com/ogrock3t/go-lw-avito/internal/model"
@@ -97,6 +101,87 @@ func TestWorker_FullQueueDoesNotBlockScanner(t *testing.T) {
 
 	close(release)
 	receive(t, finished)
+}
+
+func TestWorker_EvictionAndRejectionRecordDroppedMetrics(t *testing.T) {
+	fixture := newWorkerFixture(t, 1, 1)
+	running := staleTrip(time.Hour)
+	newest := staleTrip(10 * time.Minute)
+	oldest := staleTrip(30 * time.Minute)
+	rejected := staleTrip(5 * time.Minute)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), running.DriverID, running.TripID).
+		DoAndReturn(func(ctx context.Context, _, _ uuid.UUID) error {
+			close(started)
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), oldest.DriverID, oldest.TripID).
+		DoAndReturn(func(context.Context, uuid.UUID, uuid.UUID) error {
+			close(finished)
+			return nil
+		})
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), newest.DriverID, newest.TripID).
+		Times(0)
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), rejected.DriverID, rejected.TripID).
+		Times(0)
+
+	fixture.start(t)
+	fixture.scan(t, []model.StaleTrip{running})
+	receive(t, started)
+	fixture.scan(t, []model.StaleTrip{newest})
+	fixture.scan(t, []model.StaleTrip{oldest})
+	assertQueueDropMetrics(t, fixture.metricsReader, 3, 1)
+
+	fixture.scan(t, []model.StaleTrip{rejected})
+	assertQueueDropMetrics(t, fixture.metricsReader, 3, 2)
+
+	close(release)
+	receive(t, finished)
+}
+
+func assertQueueDropMetrics(t *testing.T, reader *sdkmetric.ManualReader, queued, dropped int64) {
+	t.Helper()
+	var data metricdata.ResourceMetrics
+	if err := reader.Collect(context.Background(), &data); err != nil {
+		t.Fatalf("collect worker metrics: %v", err)
+	}
+	counters := make(map[string]int64)
+	for _, scope := range data.ScopeMetrics {
+		for _, measurement := range scope.Metrics {
+			sum, ok := measurement.Data.(metricdata.Sum[int64])
+			if !ok {
+				continue
+			}
+			for _, point := range sum.DataPoints {
+				result, ok := point.Attributes.Value(attribute.Key("result"))
+				if ok {
+					counters[measurement.Name+"/"+result.AsString()] += point.Value
+				}
+			}
+		}
+	}
+	want := map[string]int64{
+		"tripgo.stale_checks/queued":       queued,
+		"tripgo.stale_checks/dropped":      dropped,
+		"tripgo.position_requests/dropped": dropped,
+	}
+	for name, value := range want {
+		if got := counters[name]; got != value {
+			t.Errorf("counter %s = %d, want %d", name, got, value)
+		}
+	}
 }
 
 func TestWorker_CancelQueuedTripSkipsPush(t *testing.T) {
@@ -340,6 +425,113 @@ func TestWorker_CancellationStopsScannerAndActiveRequests(t *testing.T) {
 	}
 }
 
+func TestWorker_ShutdownStopsScannerAndDrainsQueuedTasks(t *testing.T) {
+	fixture := newWorkerFixture(t, 2, 1)
+	running := staleTrip(time.Hour)
+	pending := []model.StaleTrip{staleTrip(30 * time.Minute), staleTrip(20 * time.Minute)}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	processed := make(chan uuid.UUID, 3)
+	requestErrors := make(chan error, 3)
+
+	first := fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), running.DriverID, running.TripID).
+		DoAndReturn(func(ctx context.Context, _, tripID uuid.UUID) error {
+			close(started)
+			select {
+			case <-release:
+			case <-ctx.Done():
+			}
+			processed <- tripID
+			requestErrors <- ctx.Err()
+			return ctx.Err()
+		})
+	for _, trip := range pending {
+		first = fixture.push.EXPECT().
+			RequestPosition(gomock.Any(), trip.DriverID, trip.TripID).
+			After(first).
+			DoAndReturn(func(ctx context.Context, _, tripID uuid.UUID) error {
+				processed <- tripID
+				requestErrors <- ctx.Err()
+				return ctx.Err()
+			})
+	}
+
+	fixture.start(t)
+	fixture.scan(t, []model.StaleTrip{running})
+	receive(t, started)
+	fixture.scan(t, pending)
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- fixture.worker.Shutdown(shutdownCtx)
+	}()
+
+	receive(t, fixture.scannerStopped)
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned before the active request finished: %v", err)
+	default:
+	}
+
+	close(release)
+	if err := receive(t, shutdownDone); err != nil {
+		t.Fatalf("shutdown worker: %v", err)
+	}
+	receive(t, fixture.done)
+
+	for _, want := range []uuid.UUID{running.TripID, pending[0].TripID, pending[1].TripID} {
+		if got := receive(t, processed); got != want {
+			t.Errorf("processed trip = %s, want %s", got, want)
+		}
+		if err := receive(t, requestErrors); err != nil {
+			t.Errorf("request canceled during graceful shutdown: %v", err)
+		}
+	}
+}
+
+func TestWorker_ShutdownDeadlineCancelsActiveRequestAndSkipsQueuedTasks(t *testing.T) {
+	fixture := newWorkerFixture(t, 1, 1)
+	running := staleTrip(time.Hour)
+	pending := staleTrip(30 * time.Minute)
+	started := make(chan struct{})
+	requestStopped := make(chan error, 1)
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), running.DriverID, running.TripID).
+		DoAndReturn(func(ctx context.Context, _, _ uuid.UUID) error {
+			close(started)
+			<-ctx.Done()
+			requestStopped <- ctx.Err()
+			return ctx.Err()
+		})
+	fixture.push.EXPECT().
+		RequestPosition(gomock.Any(), pending.DriverID, pending.TripID).
+		Times(0)
+
+	fixture.start(t)
+	fixture.scan(t, []model.StaleTrip{running})
+	receive(t, started)
+	fixture.scan(t, []model.StaleTrip{pending})
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownDone <- fixture.worker.Shutdown(shutdownCtx)
+	}()
+
+	receive(t, fixture.scannerStopped)
+	if err := receive(t, shutdownDone); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline exceeded", err)
+	}
+	if err := receive(t, requestStopped); !errors.Is(err, context.Canceled) {
+		t.Errorf("active request error = %v, want canceled", err)
+	}
+	receive(t, fixture.done)
+}
+
 func TestWorker_ScannerRecoversAfterRepositoryError(t *testing.T) {
 	fixture := newWorkerFixture(t, 1, 1)
 	trip := staleTrip(time.Minute)
@@ -402,13 +594,15 @@ func TestWorker_PrioritySurvivesScannerInputOrder(t *testing.T) {
 }
 
 type workerFixture struct {
-	worker *positions.Worker
-	repo   *MocktripRepository
-	push   *MockpushGateway
-	ticks  chan time.Time
-	ctx    context.Context
-	cancel context.CancelFunc
-	done   chan struct{}
+	worker         *positions.Worker
+	metricsReader  *sdkmetric.ManualReader
+	repo           *MocktripRepository
+	push           *MockpushGateway
+	ticks          chan time.Time
+	ctx            context.Context
+	cancel         context.CancelFunc
+	done           chan struct{}
+	scannerStopped chan struct{}
 }
 
 func newWorkerFixture(t *testing.T, capacity, workers int) *workerFixture {
@@ -418,26 +612,55 @@ func newWorkerFixture(t *testing.T, capacity, workers int) *workerFixture {
 	push := NewMockpushGateway(ctrl)
 	ticker := NewMockTicker(ctrl)
 	ticks := make(chan time.Time)
+	scannerStopped := make(chan struct{})
 	ticker.EXPECT().C().Return((<-chan time.Time)(ticks))
-	ticker.EXPECT().Stop()
+	ticker.EXPECT().Stop().Do(func() {
+		close(scannerStopped)
+	})
 	queue, err := positions.NewQueue(capacity)
 	if err != nil {
 		t.Fatalf("create queue: %v", err)
 	}
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
-	worker, err := positions.NewWorker(queue, workers, time.Minute, push, logger, repo, ticker, time.Minute)
+	metricsReader := sdkmetric.NewManualReader()
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(metricsReader))
+	t.Cleanup(func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			t.Errorf("shutdown worker metrics: %v", err)
+		}
+	})
+	metrics, err := positions.NewMetrics(provider, queue)
+	if err != nil {
+		t.Fatalf("create position metrics: %v", err)
+	}
+	tracer := tracenoop.NewTracerProvider().Tracer("positions.test")
+
+	worker, err := positions.NewWorker(
+		queue,
+		workers,
+		time.Minute,
+		push,
+		logger,
+		repo,
+		ticker,
+		time.Minute,
+		metrics,
+		tracer,
+	)
 	if err != nil {
 		t.Fatalf("create worker: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &workerFixture{
-		worker: worker,
-		repo:   repo,
-		push:   push,
-		ticks:  ticks,
-		ctx:    ctx,
-		cancel: cancel,
-		done:   make(chan struct{}),
+		worker:         worker,
+		metricsReader:  metricsReader,
+		repo:           repo,
+		push:           push,
+		ticks:          ticks,
+		ctx:            ctx,
+		cancel:         cancel,
+		done:           make(chan struct{}),
+		scannerStopped: scannerStopped,
 	}
 }
 

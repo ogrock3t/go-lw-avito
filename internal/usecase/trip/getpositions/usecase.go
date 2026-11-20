@@ -2,7 +2,9 @@ package getpositions
 
 import (
 	"context"
+
 	"github.com/google/uuid"
+
 	"github.com/ogrock3t/go-lw-avito/internal/domain/trip"
 )
 
