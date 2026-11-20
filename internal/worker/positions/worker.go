@@ -19,6 +19,13 @@ type Worker struct {
 	repo       tripRepository
 	ticker     Ticker
 	staleAfter time.Duration
+
+	lifecycleMu sync.Mutex
+	started     bool
+
+	cancelScanner context.CancelFunc
+	cancelWorkers context.CancelFunc
+	done          chan struct{}
 }
 
 func NewWorker(
@@ -60,30 +67,97 @@ func NewWorker(
 }
 
 func (w *Worker) Run(ctx context.Context) {
-	var wg sync.WaitGroup
-
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-
-		w.runScanner(ctx)
-	}()
-
-	for i := 0; i < w.workers; i++ {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
-			w.runWorker(ctx)
-		}()
+	if err := w.Start(ctx); err != nil {
+		w.logger.ErrorContext(
+			ctx,
+			"start position worker",
+			slog.Any("error", err),
+		)
+		return
 	}
 
-	wg.Wait()
+	<-w.done
 }
 
 func (w *Worker) CancelTrip(tripID uuid.UUID) {
 	w.queue.CancelTrip(tripID)
+}
+
+func (w *Worker) Start(ctx context.Context) error {
+	w.lifecycleMu.Lock()
+	defer w.lifecycleMu.Unlock()
+
+	if w.started {
+		return fmt.Errorf("position worker already started")
+	}
+
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("start position worker: %w", err)
+	}
+
+	scannerCtx, cancelScanner := context.WithCancel(ctx)
+	workersCtx, cancelWorkers := context.WithCancel(ctx)
+
+	w.cancelScanner = cancelScanner
+	w.cancelWorkers = cancelWorkers
+	w.done = make(chan struct{})
+	w.started = true
+
+	var wg sync.WaitGroup
+	wg.Add(1 + w.workers)
+
+	go func() {
+		defer wg.Done()
+		defer w.queue.Close()
+
+		w.runScanner(scannerCtx)
+	}()
+
+	for i := 0; i < w.workers; i++ {
+		go func() {
+			defer wg.Done()
+
+			w.runWorker(workersCtx)
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+
+		cancelScanner()
+		cancelWorkers()
+		close(w.done)
+	}()
+
+	return nil
+}
+
+func (w *Worker) Shutdown(ctx context.Context) error {
+	w.lifecycleMu.Lock()
+
+	if !w.started {
+		w.lifecycleMu.Unlock()
+		return nil
+	}
+
+	cancelScanner := w.cancelScanner
+	cancelWorkers := w.cancelWorkers
+	done := w.done
+
+	w.lifecycleMu.Unlock()
+
+	cancelScanner()
+
+	select {
+	case <-done:
+		return nil
+
+	case <-ctx.Done():
+		cancelWorkers()
+		<-done
+
+		return fmt.Errorf("shutdown position worker: %w", ctx.Err())
+	}
 }
 
 func (w *Worker) runWorker(ctx context.Context) {
