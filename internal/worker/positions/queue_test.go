@@ -247,3 +247,126 @@ func requireQueued(t *testing.T, queue *Queue, job task) {
 		t.Fatalf("enqueue result = %q, evicted = %+v, want queued without eviction", result, evicted)
 	}
 }
+
+func TestQueue_CloseRejectsNewTasksAndDrainsExisting(t *testing.T) {
+	queue := newTestQueue(t, 2)
+	oldest := newTestTask(20 * time.Minute)
+	newest := newTestTask(10 * time.Minute)
+
+	requireQueued(t, queue, newest)
+	requireQueued(t, queue, oldest)
+
+	queue.Close()
+	queue.Close()
+
+	result, evicted := queue.tryEnqueue(newTestTask(time.Minute))
+	if result != resultClosed || evicted != nil {
+		t.Fatalf(
+			"enqueue result = %q, evicted = %+v, want closed without eviction",
+			result,
+			evicted,
+		)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	for _, want := range []task{oldest, newest} {
+		got, ok := queue.dequeue(ctx)
+		if !ok || got.tripID != want.tripID {
+			t.Fatalf(
+				"dequeued trip = %s, present = %v, want %s",
+				got.tripID,
+				ok,
+				want.tripID,
+			)
+		}
+
+		if !queue.start(got, cancel) {
+			t.Fatal("cannot start task from closed queue")
+		}
+
+		queue.complete(got)
+	}
+
+	if _, ok := queue.dequeue(ctx); ok {
+		t.Fatal("closed queue returned a task after draining")
+	}
+
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("draining waited until context cancellation: %v", err)
+	}
+}
+
+func TestQueue_CloseReleasesAllConsumers(t *testing.T) {
+	const consumers = 8
+
+	queue := newTestQueue(t, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	started := make(chan struct{}, consumers)
+	results := make(chan bool, consumers)
+
+	for i := 0; i < consumers; i++ {
+		go func() {
+			started <- struct{}{}
+
+			_, ok := queue.dequeue(ctx)
+
+			results <- !ok && ctx.Err() == nil
+		}()
+	}
+
+	for i := 0; i < consumers; i++ {
+		<-started
+	}
+
+	queue.Close()
+
+	for i := 0; i < consumers; i++ {
+		select {
+		case success := <-results:
+			if !success {
+				t.Error("consumer returned a task or waited for context cancellation")
+			}
+
+		case <-ctx.Done():
+			t.Fatal("consumers did not finish after closing the queue")
+		}
+	}
+}
+
+func TestQueue_CancelTaskAfterClose(t *testing.T) {
+	queue := newTestQueue(t, 2)
+	canceled := newTestTask(20 * time.Minute)
+	remaining := newTestTask(10 * time.Minute)
+
+	requireQueued(t, queue, canceled)
+	requireQueued(t, queue, remaining)
+
+	queue.Close()
+	queue.CancelTrip(canceled.tripID)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	got, ok := queue.dequeue(ctx)
+	if !ok || got.tripID != remaining.tripID {
+		t.Fatalf(
+			"dequeued trip = %s, present = %v, want %s",
+			got.tripID,
+			ok,
+			remaining.tripID,
+		)
+	}
+	queue.complete(got)
+
+	if _, ok := queue.dequeue(ctx); ok {
+		t.Fatal("closed queue returned a canceled task")
+	}
+
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("dequeue waited until context cancellation: %v", err)
+	}
+}

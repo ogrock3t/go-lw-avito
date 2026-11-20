@@ -23,6 +23,7 @@ type Config struct {
 	Database  DatabaseConfig
 	Telemetry TelemetryConfig
 	Positions PositionsConfig
+	Push      PushConfig
 }
 
 type HTTPConfig struct {
@@ -51,7 +52,15 @@ type TelemetryConfig struct {
 }
 
 type PositionsConfig struct {
-	QueueSize int `env:"POSITION_QUEUE_SIZE" env-default:"100" validate:"gt=0"`
+	CheckInterval time.Duration `env:"POSITION_CHECK_INTERVAL" env-default:"30s" validate:"gt=0"`
+	StaleAfter    time.Duration `env:"POSITION_STALE_AFTER" env-default:"60s" validate:"gt=0"`
+	Workers       int           `env:"POSITION_WORKERS" env-default:"4" validate:"gt=0"`
+	QueueSize     int           `env:"POSITION_QUEUE_SIZE" env-default:"100" validate:"gt=0"`
+}
+
+type PushConfig struct {
+	HTTPURL        string        `env:"PUSH_HTTP_URL" env-required:"true" validate:"required,http_url"`
+	RequestTimeout time.Duration `env:"PUSH_REQUEST_TIMEOUT" env-default:"1s" validate:"gt=0"`
 }
 
 func Load() (Config, error) {

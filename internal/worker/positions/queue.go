@@ -16,6 +16,7 @@ const (
 	resultDropped   enqueueResult = "dropped"
 	resultDuplicate enqueueResult = "duplicate"
 	resultCanceled  enqueueResult = "canceled"
+	resultClosed    enqueueResult = "closed"
 )
 
 type activeTask struct {
@@ -28,6 +29,7 @@ type Queue struct {
 	tasks       taskHeap
 	capacity    int
 	available   chan struct{}
+	closed      chan struct{}
 	activeTasks map[uuid.UUID]activeTask
 
 	canceledDuringScan map[uuid.UUID]struct{}
@@ -42,8 +44,21 @@ func NewQueue(capacity int) (*Queue, error) {
 		tasks:       make(taskHeap, 0, capacity),
 		capacity:    capacity,
 		available:   make(chan struct{}, 1),
+		closed:      make(chan struct{}),
 		activeTasks: make(map[uuid.UUID]activeTask),
 	}, nil
+}
+
+func (q *Queue) Close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	select {
+	case <-q.closed:
+		return
+	default:
+		close(q.closed)
+	}
 }
 
 func (q *Queue) beginScan() {
@@ -63,6 +78,12 @@ func (q *Queue) endScan() {
 func (q *Queue) tryEnqueue(newTask task) (enqueueResult, *task) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+
+	select {
+	case <-q.closed:
+		return resultClosed, nil
+	default:
+	}
 
 	if _, canceled := q.canceledDuringScan[newTask.tripID]; canceled {
 		return resultCanceled, nil
@@ -134,6 +155,9 @@ func (q *Queue) dequeue(ctx context.Context) (task, bool) {
 		case <-ctx.Done():
 			return task{}, false
 		case <-q.available:
+			continue
+		case <-q.closed:
+			return q.tryDequeue()
 		}
 	}
 }

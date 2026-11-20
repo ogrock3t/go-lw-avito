@@ -2,6 +2,7 @@ package getpositions
 
 import (
 	"context"
+
 	api "github.com/ogrock3t/go-lw-avito/internal/generated"
 	"github.com/ogrock3t/go-lw-avito/internal/http/domainerror"
 	"github.com/ogrock3t/go-lw-avito/internal/http/response"
